@@ -13,6 +13,7 @@ gomon -cmd 'command [&& command]' [-stdin]
       -cmd,         Specify the commands to be executed after file change has occured
       -stdin        Attach to STDIN of the supprocesses
                     (which are created for running the commands)
+      -v            Print gomon specific logs
 ```
 
 ### gomon.json

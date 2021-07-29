@@ -31,9 +31,9 @@ type WatcherConfig struct {
 // Returns the default config, if no gomon.json file is available
 // for (2) it checks both json file and the flags
 // for (3) it checks flag only.
-func getConfig() (*WatcherConfig, *[]string, *bool) {
+func getConfig() (*WatcherConfig, *[]string, *bool, *bool) {
 	// Get commands and attach stdin from flags
-	commands, attachStdin := parseFlags()
+	commands, attachStdin, verbose := parseFlags()
 
 	// Default configuration for Watcher
 	var config = WatcherConfig{
@@ -49,7 +49,7 @@ func getConfig() (*WatcherConfig, *[]string, *bool) {
 	jsonConf, err := getConfFromJSON()
 	// If some error occured while reading the file, return the default cfg
 	if err != nil {
-		return &config, commands, attachStdin
+		return &config, commands, attachStdin, verbose
 	}
 
 	// Frame a new pattern to watch for files
@@ -89,7 +89,7 @@ func getConfig() (*WatcherConfig, *[]string, *bool) {
 		commands = &cmds
 	}
 
-	return &config, commands, attachStdin
+	return &config, commands, attachStdin, verbose
 }
 
 // parses the flags
@@ -97,14 +97,15 @@ func getConfig() (*WatcherConfig, *[]string, *bool) {
 // return &commands, flagStdin
 // 		if no --cmd is mentioned   => commands => nil
 // 		if no --stdin is mentioned => flagStdin = false
-func parseFlags() (*[]string, *bool) {
+func parseFlags() (*[]string, *bool, *bool) {
 	flagCmd := flag.String("cmd", "", "Specifies the commands to be execute. 'command1 [&& command2 ...]'")
 	flagStdin := flag.Bool("stdin", false, "If specified, will attach to stdin of subprocess")
+	flagVerbose := flag.Bool("v", false, "If specified, gomon specific logs will be printed")
 	flag.Parse()
 
 	// if "cmd" is not mentioned, return nil
 	if strings.Trim(*flagCmd, " ") == "" {
-		return nil, flagStdin
+		return nil, flagStdin, flagVerbose
 	}
 
 	// "cmd" is expected to be in the format 'command1 && command2 ...'
@@ -115,7 +116,7 @@ func parseFlags() (*[]string, *bool) {
 		commands = append(commands, trimmed)
 	}
 
-	return &commands, flagStdin
+	return &commands, flagStdin, flagVerbose
 }
 
 func getPWD() string {

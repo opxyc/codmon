@@ -12,7 +12,7 @@ import (
 
 func main() {
 	// Get config from json and command line flags
-	config, commands, attachStdin := getConfig()
+	config, commands, attachStdin, verbose := getConfig()
 	// if no commands are mentioned for execution after file modification, then
 	// gomon has nothing to do. Simply exit.
 	if commands == nil {
@@ -51,7 +51,7 @@ func main() {
 	// watch for file changes
 	go watch(w, config, jobs)
 	// run the commands on file change
-	go worker(jobs, *commands, attachStdin)
+	go worker(jobs, *commands, attachStdin, verbose)
 	// to run the commands on startup, send a message to the channel
 	// on receiving message, worker will start it's job
 	jobs <- "start"
