@@ -42,7 +42,7 @@ func worker(jobs <-chan string, commands []string, attachStdin *bool, verbose *b
 		}
 		// give a little pause so that if any process it killed,
 		// it's status is logged to console
-		time.Sleep(time.Millisecond * 1000)
+		time.Sleep(time.Millisecond * 400)
 		// inform that current process is killed
 		okToExecute <- true
 	}
@@ -78,7 +78,6 @@ func runCommands(commands []string, okToExecute <-chan bool, attachStdin *bool, 
 					if err != nil {
 						if currentProcess != nil {
 							fmt.Printf("[gomon] Process %d terminated with error or was killed. Error: %v\n", cmd.Process.Pid, err)
-							currentProcess = nil
 						}
 					} else {
 						fmt.Printf("[gomon] Process %d completed successfully\n", cmd.Process.Pid)

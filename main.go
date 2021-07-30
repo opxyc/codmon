@@ -66,11 +66,20 @@ func main() {
 // watch watches for file changes
 // when it detects any change, it will sent a message to jobs channel
 func watch(w *watcher.Watcher, config *WatcherConfig, jobs chan<- string) {
+	// wait for send message to jobs channel since sometimes,
+	// user may press save multiple times so quickly
+	// which will make worker do unnecessary execution of commands
+	var prevMsgSent, currentTime time.Time
 	for {
 		select {
 		case event := <-w.Event:
 			if isItWorthIt(event.Path, config) {
-				jobs <- event.Path
+				currentTime = time.Now()
+				// if time difference < 1sec, dont bother
+				if !(currentTime.Sub(prevMsgSent) < time.Second) {
+					jobs <- event.Path
+					prevMsgSent = currentTime
+				}
 			}
 		case err := <-w.Error:
 			fmt.Println(err)
