@@ -76,7 +76,7 @@ func watch(w *watcher.Watcher, config *WatcherConfig, jobs chan<- string) {
 			if isItWorthIt(event.Path, config) {
 				currentTime = time.Now()
 				// if time difference < 1sec, dont bother
-				if !(currentTime.Sub(prevMsgSent) < time.Second) {
+				if !(currentTime.Sub(prevMsgSent) < time.Second*3) {
 					jobs <- event.Path
 					prevMsgSent = currentTime
 				}
