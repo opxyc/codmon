@@ -3,17 +3,19 @@
 A (very) simple tool to automatically run commands upon file update.
 
 ### Installation
-```ps
-go get -u github.com/opxyc/gomon
+```
+go install github.com/opxyc/gomon
 ```
 
 ### Usage:
 ```
-gomon -cmd 'command [&& command]' [-stdin]
-      -cmd,         Specify the commands to be executed after file change has occured
-      -stdin        Attach to STDIN of the supprocesses
-                    (which are created for running the commands)
-      -v            Print gomon specific logs
+gomon [FLAGS] 'command1 [&& command ...]'
+  -stdin
+        attach to stdin of executing commands
+  -v    get verbose output (for debugging)
+  -w string
+        file extensions to watch for
+        Ex: Use 'gomon -w go,c' to watch for .go and .c files
 ```
 
 ### gomon.json

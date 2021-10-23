@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,15 +13,12 @@ import (
 
 func main() {
 	// Get config from json and command line flags
-	config, commands, attachStdin, verbose := getConfig()
+	config, commands, attachStdin, verbose := get()
 	// if no commands are mentioned for execution after file modification, then
 	// gomon has nothing to do. Simply exit.
 	if commands == nil {
-		fmt.Println("Usage: \ngomon -cmd 'command1 [&& command]' [-stdin]")
-		fmt.Println("      -cmd     Specify the commands to be executed after file change has occured")
-		fmt.Println("      -stdin   Attach to STDIN if the supprocesses")
-		fmt.Println("               (which are created for running the commands)")
-		return
+		fmt.Fprintf(os.Stderr, "Usage: \n\t%s 'command1 [&& command ...]'\n\tUse --help for more\n", os.Args[0])
+		os.Exit(2)
 	}
 
 	// "job" entering the jobs channel is consumed by the "worker".
@@ -32,7 +30,6 @@ func main() {
 	// it has started before (when it received the previous file change message)
 	jobs := make(chan string)
 
-	// watcher comes from "github.com/radovskyb/watcher" package
 	w := watcher.New()
 	defer w.Close()
 	w.SetMaxEvents(1)
@@ -44,8 +41,8 @@ func main() {
 
 	// Watch this folder for changes.
 	if err := w.AddRecursive("."); err != nil {
-		fmt.Println(err)
-		return
+		fmt.Fprintf(os.Stderr, "failed to watch for file change: %v\n", err)
+		os.Exit(2)
 	}
 
 	// watch for file changes
@@ -57,15 +54,15 @@ func main() {
 	jobs <- "start"
 
 	// Start the watching process
-	if err := w.Start(time.Millisecond * 500); err != nil {
-		fmt.Println(err)
-		return
+	if err := w.Start(time.Millisecond * 300); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start watcher: %v\n", err)
+		os.Exit(2)
 	}
 }
 
 // watch watches for file changes
 // when it detects any change, it will sent a message to jobs channel
-func watch(w *watcher.Watcher, config *WatcherConfig, jobs chan<- string) {
+func watch(w *watcher.Watcher, config *watcherConf, jobs chan<- string) {
 	// wait for send message to jobs channel since sometimes,
 	// user may press save multiple times so quickly
 	// which will make worker do unnecessary execution of commands
@@ -90,12 +87,11 @@ func watch(w *watcher.Watcher, config *WatcherConfig, jobs chan<- string) {
 	}
 }
 
-// isItWorthIt checks if the file change which is detected by the watcher
-// is worth running all the commands mentioned once again.
+// isItWorthIt checks if the file changed is worth running all the commands mentioned.
 // How does it decide the worth?
 // * if the directory in which the change occured is mentioned in "exclude.dirs", then it's not worthy
 // * if the file which was changed in mentioned in the "exclude.files", then it's not worthy
-func isItWorthIt(filePath string, config *WatcherConfig) bool {
+func isItWorthIt(filePath string, config *watcherConf) bool {
 	dir := filepath.Dir(filePath)
 	dir = strings.Replace(dir, "\\", "/", 99)
 	for _, d := range config.ExcludedDirs {

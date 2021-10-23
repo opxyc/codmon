@@ -4,45 +4,58 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
 )
 
-// JSONConfig - defines the format in which gomon.json file should be parsed
-type JSONConfig struct {
+// jsonConf defines the format in which gomon.json file should be parsed
+type jsonConf struct {
 	Watch   []string            `json:"watch"`
 	Exclude map[string][]string `json:"exclude"`
 	Cmd     string              `json:"cmd"`
 }
 
-type WatcherConfig struct {
+// watcherConf is the configuration for watcher.
+type watcherConf struct {
 	ExcludedDirs  []string
 	ExcludedFiles []string
 	Pattern       *regexp.Regexp
 }
 
-// GetConf returns:
-// (1) the config (files and folders to be excluded, file extensions to be watched for)
-// (2) the commands to be executed and
-// (3) whether stdin is to be attached to the subprocesses(created for running the commands)
+// Returns the configuration for Watcher, commands to execute, attachStdin and verbose flags.
+func get() (*watcherConf, *[]string, *bool, *bool) {
+	// get returns:
+	// (1) the config (files and folders to be excluded, file extensions to be watched for)
+	// (2) the commands to be executed
+	// (3) whether stdin is to be attached to the subprocesses(created for running the commands) and
+	// (4) whether verbose output is needed
+	// --
+	// For (2) it checks the arguments, pipe and json file in the order of priority.
+	watch, commands, attachStdin, verbose := parse()
 
-// Returns the default config, if no gomon.json file is available
-// for (2) it checks both json file and the flags
-// for (3) it checks flag only.
-func getConfig() (*WatcherConfig, *[]string, *bool, *bool) {
-	// Get commands and attach stdin from flags
-	commands, attachStdin, verbose := parseFlags()
+	// prepare patten of file extensions to watch for
+	// --
+	// by default, watch all files
+	pattern := regexp.MustCompile(`(.+\.*)$`)
+	// use extensions provided via -w flag
+	if len(*watch) > 0 {
+		pattern = createPattern(watch)
+		if *verbose {
+			fmt.Printf("[gomon] watching for files: %+v\n", *watch)
+		}
+	}
 
 	// Default configuration for Watcher
-	var config = WatcherConfig{
+	var config = watcherConf{
 		// Excludes no directories except hidden dirs
 		ExcludedDirs: []string{},
 		// Excludes no files except hidden files
 		ExcludedFiles: []string{},
-		// Watches all .go files
-		Pattern: regexp.MustCompile(`(.+\.*)$`),
+		// Watches all files
+		Pattern: pattern,
 	}
 
 	// Get the configuration from json file
@@ -52,15 +65,18 @@ func getConfig() (*WatcherConfig, *[]string, *bool, *bool) {
 		return &config, commands, attachStdin, verbose
 	}
 
+	if *verbose {
+		fmt.Printf("[gomon] JSON file read: %+v\n", jsonConf)
+	}
+
 	// Frame a new pattern to watch for files
-	if jsonConf.Watch != nil {
-		pattern := ``
-		if len(jsonConf.Watch) != 0 {
-			for _, fileExtension := range jsonConf.Watch {
-				pattern += fmt.Sprintf(`.+.%s$|`, fileExtension)
-			}
+	// if -w flag is mentioned, it should override
+	// file extensions mentioned via json configuraiton
+	if len(*watch) == 0 && jsonConf.Watch != nil {
+		config.Pattern = createPattern(&jsonConf.Watch)
+		if *verbose {
+			fmt.Printf("[gomon] watching for files: %+v\n", jsonConf.Watch)
 		}
-		config.Pattern = regexp.MustCompile(pattern[:len(pattern)-1])
 	}
 
 	// get Persent Working Directory
@@ -78,9 +94,9 @@ func getConfig() (*WatcherConfig, *[]string, *bool, *bool) {
 		config.ExcludedFiles = append(config.ExcludedFiles, pattern)
 	}
 
-	// More priority is given to "cmd" mentioned in flag
+	// More priority is given to commands specified via argument and pipe.
 	// So, only if flag is not given, try to get it from json file.
-	if commands == nil && &jsonConf.Cmd != nil && strings.Trim(jsonConf.Cmd, " ") != "" {
+	if commands == nil && &jsonConf.Cmd != nil {
 		var cmds []string
 		for _, command := range strings.Split(jsonConf.Cmd, "&&") {
 			trimmed := strings.Trim(command, " ")
@@ -92,38 +108,75 @@ func getConfig() (*WatcherConfig, *[]string, *bool, *bool) {
 	return &config, commands, attachStdin, verbose
 }
 
-// parses the flags
-// Output:
-// return &commands, flagStdin
-// 		if no --cmd is mentioned   => commands => nil
-// 		if no --stdin is mentioned => flagStdin = false
-func parseFlags() (*[]string, *bool, *bool) {
-	flagCmd := flag.String("cmd", "", "Specifies the commands to be execute. 'command1 [&& command2 ...]'")
-	flagStdin := flag.Bool("stdin", false, "If specified, will attach to stdin of subprocess")
-	flagVerbose := flag.Bool("v", false, "If specified, gomon specific logs will be printed")
+// parse parses flags and inputs.
+func parse() (watch *[]string, commands *[]string, stdin *bool, v *bool) {
+	// commands - the commands to be excuted on file change
+	// watch 	- the file extensions to watch for. ex: ["go", "c"]
+	// stdin	- flag -stdin
+	// v		- flag -v
+	w := flag.String("w", "", fmt.Sprintf("file extensions to watch for\nEx: Use '%s -w go,c' to watch for .go and .c files", os.Args[0]))
+	stdin = flag.Bool("stdin", false, "attach to stdin of executing commands")
+	v = flag.Bool("v", false, "get verbose output (for debugging)")
 	flag.Parse()
 
-	// if "cmd" is not mentioned, return nil
-	if strings.Trim(*flagCmd, " ") == "" {
-		return nil, flagStdin, flagVerbose
+	var extnsToWatch []string
+	if *w != "" {
+		for _, ext := range strings.Split(*w, ",") {
+			extnsToWatch = append(extnsToWatch, strings.Trim(ext, " "))
+		}
 	}
 
-	// "cmd" is expected to be in the format 'command1 && command2 ...'
+	// get the commands to be executed
+	isPiped := false
+	if flag.NArg() < 1 {
+		// if arguments are not present, check for piped input
+		stdinInf, err := os.Stdin.Stat()
+		if err != nil || stdinInf.Mode()&os.ModeCharDevice != 0 {
+			return &extnsToWatch, nil, stdin, v
+		}
+
+		isPiped = true
+	}
+
+	var cmdRaw string
+	if !isPiped {
+		cmdRaw = flag.Arg(0)
+	} else {
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Printf("[!] could not read piped input: %v\n", err)
+		}
+		cmdRaw = string(b)
+		// remove \n present at the end
+		cmdRaw = cmdRaw[:len(cmdRaw)-1]
+	}
+
+	// commands are expected to be given in the format 'command1 && command2 ...'
 	// so, split it with "&&" and form a slice
-	var commands []string
-	for _, command := range strings.Split(*flagCmd, "&&") {
-		trimmed := strings.Trim(command, " ")
-		commands = append(commands, trimmed)
+	var cmds []string
+	for _, command := range strings.Split(cmdRaw, "&&") {
+		cmds = append(cmds, strings.Trim(command, " "))
 	}
 
-	return &commands, flagStdin, flagVerbose
+	return &extnsToWatch, &cmds, stdin, v
+}
+
+func createPattern(extnsToWatch *[]string) *regexp.Regexp {
+	pattern := ``
+	if len(*extnsToWatch) != 0 {
+		for _, fileExtension := range *extnsToWatch {
+			pattern += fmt.Sprintf(`.+.%s$|`, fileExtension)
+		}
+	}
+
+	return regexp.MustCompile(pattern[:len(pattern)-1])
 }
 
 func getPWD() string {
 	pwd, err := os.Getwd()
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "failed to get PWD:", err)
+		os.Exit(2)
 	}
 	return strings.Replace(pwd, "\\", "/", len(pwd))
 }
@@ -150,14 +203,14 @@ func formatFilePattern(pattern *string, pwd *string) {
 }
 
 // getConfFromJSON simply tries to read the json file.
-// Returns JSONConfig if ok, error otherwise
-func getConfFromJSON() (*JSONConfig, error) {
+// Returns jsonConf if ok, error otherwise
+func getConfFromJSON() (*jsonConf, error) {
 	data, err := ioutil.ReadFile("./gomon.json")
 	if err != nil {
 		return nil, err
 	}
 
-	var config JSONConfig
+	var config jsonConf
 	err = json.Unmarshal(data, &config)
 	if err != nil {
 		fmt.Println("[!] Failed to parse gonom.json.")
