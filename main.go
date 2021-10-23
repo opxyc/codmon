@@ -51,7 +51,7 @@ func main() {
 	go worker(jobs, *commands, attachStdin, verbose)
 	// to run the commands on startup, send a message to the channel
 	// on receiving message, worker will start it's job
-	jobs <- "start"
+	jobs <- "nothing"
 
 	// Start the watching process
 	if err := w.Start(time.Millisecond * 300); err != nil {

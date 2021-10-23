@@ -29,15 +29,18 @@ func worker(jobs <-chan string, commands []string, attachStdin *bool, verbose *b
 
 	for {
 		// receive a job
-		<-jobs
+		f := <-jobs
+		if *verbose {
+			fmt.Printf("[gomon] change in: %s\n", f)
+		}
 		// kill current running process
 		if currentProcess != nil {
 			pid := currentProcess.Pid
 			err := killProcess(currentProcess)
 			if err != nil && *verbose {
-				fmt.Printf("[gomon] Failed to kill process %d. Error: %v\n", pid, err)
+				fmt.Printf("[gomon] failed to kill process %d: %v\n", pid, err)
 			} else if err == nil && *verbose {
-				fmt.Printf("[gomon] Killed process %d\n", pid)
+				fmt.Printf("[gomon] killed process %d\n", pid)
 			}
 		}
 		// give a little pause so that if any process it killed,
@@ -62,27 +65,29 @@ func runCommands(commands []string, okToExecute <-chan bool, attachStdin *bool, 
 				// start a new process
 				cmd, err := startCommand(command, attachStdin)
 				if err != nil {
-					fmt.Printf(color.RedString("[gomon] Failed to start. Error: %v\n", err))
+					fmt.Printf(color.RedString("[gomon] failed to start : %v\n", err))
 					continue
 				}
 
 				currentProcess = cmd.Process
 				// go writeResults(pipeChan)
 				if *verbose {
-					fmt.Printf("[gomon] Process %d created for executing '%s'\n", currentProcess.Pid, command)
+					fmt.Printf("[gomon] process %d created for executing '%s'\n", currentProcess.Pid, command)
 				}
 
 				// wait for it to finish
 				err = cmd.Wait()
 				if err != nil {
 					if *verbose {
-						fmt.Printf("[gomon] Process %d terminated with error or was killed. Error: %v\n", cmd.Process.Pid, err)
+						fmt.Printf("[gomon] process %d terminated: %v\n", cmd.Process.Pid, err)
 					}
 					break
 				}
 
+				currentProcess = nil
+
 				if *verbose {
-					fmt.Printf("[gomon] Process %d completed successfully\n", cmd.Process.Pid)
+					fmt.Printf("[gomon] process %d completed successfully\n", cmd.Process.Pid)
 				}
 			}
 			return
