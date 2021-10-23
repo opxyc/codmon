@@ -140,7 +140,7 @@ func parse() (watch *[]string, commands *[]string, stdin *bool, v *bool) {
 
 	var cmdRaw string
 	if !isPiped {
-		cmdRaw = flag.Arg(0)
+		cmdRaw = strings.Join(flag.Args()[:], " ")
 	} else {
 		b, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -150,6 +150,8 @@ func parse() (watch *[]string, commands *[]string, stdin *bool, v *bool) {
 		// remove \n present at the end
 		cmdRaw = cmdRaw[:len(cmdRaw)-1]
 	}
+
+	fmt.Println(cmdRaw)
 
 	// commands are expected to be given in the format 'command1 && command2 ...'
 	// so, split it with "&&" and form a slice
